@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.sam.pi-telegram-bot</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/sam.painter/Projects/pi-telegram-bot/start.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/sam.painter/Projects/pi-telegram-bot</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/sam.painter/.local/bin:/Users/sam.painter/.cargo/bin</string>
+        <key>HOME</key>
+        <string>/Users/sam.painter</string>
+    </dict>
+
+    <!-- Start on login -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Always keep running — restart on any exit -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Wait 30 seconds before restarting after exit — reduces 409 pile-ups -->
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <!-- Logs -->
+    <key>StandardOutPath</key>
+    <string>/Users/sam.painter/Library/Logs/pi-telegram-bot/stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/sam.painter/Library/Logs/pi-telegram-bot/stderr.log</string>
+</dict>
+</plist>

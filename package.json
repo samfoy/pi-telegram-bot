@@ -1,0 +1,34 @@
+{
+  "name": "pi-telegram-bot",
+  "version": "0.1.0",
+  "description": "Telegram bot exposing pi as a conversational coding agent. Chat with pi in Telegram with streaming responses, tool execution, threaded sessions, and model switching.",
+  "keywords": [
+    "pi-package",
+    "app"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node --import tsx/esm src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "check": "tsc --noEmit && eslint src/"
+  },
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "^0.55.4",
+    "dotenv": "^16.4.7",
+    "grammy": "^1.35.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.0.0",
+    "eslint": "^10.0.3",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.57.0"
+  }
+}
