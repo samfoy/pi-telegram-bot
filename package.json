@@ -1,5 +1,5 @@
 {
-  "name": "pi-telegram-bot",
+  "name": "@samfp/pi-telegram-bot",
   "version": "0.1.0",
   "description": "Telegram bot exposing pi as a conversational coding agent. Chat with pi in Telegram with streaming responses, tool execution, threaded sessions, and model switching.",
   "keywords": [
