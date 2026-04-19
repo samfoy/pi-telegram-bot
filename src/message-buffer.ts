@@ -15,7 +15,7 @@ export interface BufferedMessage {
   images?: import("@mariozechner/pi-ai").ImageContent[];
 }
 
-type FlushCallback = (combined: BufferedMessage) => void;
+type FlushCallback = (combined: BufferedMessage) => void | Promise<void>;
 
 interface Buffer {
   parts: BufferedMessage[];
@@ -39,7 +39,7 @@ export class MessageBuffer {
       if (existing.parts.length >= MAX_PARTS || totalChars > MAX_TOTAL_CHARS) {
         clearTimeout(existing.timer);
         this._buffers.delete(key);
-        this._flush(existing.parts);
+        this._flush(key, existing.parts);
         // Start new buffer for this message
         this._startBuffer(key, msg);
         return;
@@ -49,7 +49,7 @@ export class MessageBuffer {
       existing.parts.push(msg);
       existing.timer = setTimeout(() => {
         this._buffers.delete(key);
-        this._flush(existing.parts);
+        this._flush(key, existing.parts);
       }, DEBOUNCE_MS);
     } else {
       this._startBuffer(key, msg);
@@ -61,7 +61,7 @@ export class MessageBuffer {
     for (const [key, buf] of this._buffers) {
       clearTimeout(buf.timer);
       this._buffers.delete(key);
-      this._flush(buf.parts);
+      this._flush(key, buf.parts);
     }
   }
 
@@ -69,20 +69,50 @@ export class MessageBuffer {
     const parts = [msg];
     const timer = setTimeout(() => {
       this._buffers.delete(key);
-      this._flush(parts);
+      this._flush(key, parts);
     }, DEBOUNCE_MS);
     this._buffers.set(key, { parts, timer });
   }
 
-  private _flush(parts: BufferedMessage[]): void {
+  private _flush(key: string, parts: BufferedMessage[]): void {
     if (parts.length === 0) return;
-    if (parts.length === 1) {
-      this._onFlush(parts[0]);
-      return;
+
+    // Copy buffer contents before sending — only consider sent after callback succeeds
+    const snapshot = [...parts];
+    let combined: BufferedMessage;
+    if (snapshot.length === 1) {
+      combined = snapshot[0];
+    } else {
+      const text = snapshot.map((p) => p.text).filter(Boolean).join("\n");
+      const images = snapshot.flatMap((p) => p.images ?? []);
+      combined = { text, images: images.length > 0 ? images : undefined };
     }
-    // Combine text with newlines, merge images
-    const text = parts.map((p) => p.text).filter(Boolean).join("\n");
-    const images = parts.flatMap((p) => p.images ?? []);
-    this._onFlush({ text, images: images.length > 0 ? images : undefined });
+
+    try {
+      const result = this._onFlush(combined);
+      // If the callback returns a promise, handle async failure
+      if (result && typeof (result as Promise<void>).catch === "function") {
+        (result as Promise<void>).catch(() => {
+          // Re-enqueue the parts that failed to send
+          this._requeue(key, snapshot);
+        });
+      }
+    } catch {
+      // Sync failure — re-enqueue
+      this._requeue(key, snapshot);
+    }
+  }
+
+  private _requeue(key: string, parts: BufferedMessage[]): void {
+    const existing = this._buffers.get(key);
+    if (existing) {
+      // Prepend failed parts before any new ones
+      existing.parts = [...parts, ...existing.parts];
+    } else {
+      // Restart a buffer with the failed parts
+      for (const part of parts) {
+        this.push(key, part);
+      }
+    }
   }
 }

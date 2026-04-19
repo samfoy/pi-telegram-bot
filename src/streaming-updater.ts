@@ -1,6 +1,7 @@
 import type { Api } from "grammy";
+import { GrammyError } from "grammy";
 import { markdownToTelegram, splitMessage, formatToolSummaryLine, type ToolCallRecord } from "./formatter.js";
-import { retryTelegramCall } from "./telegram-retry.js";
+import { retryTelegramCall, getRetryDelayMs } from "./telegram-retry.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("streaming-updater");
@@ -244,10 +245,7 @@ export class StreamingUpdater {
     try {
       for (let i = 0; i < chunks.length; i++) {
         if (i < allMessages.length) {
-          await retryTelegramCall(
-            () => this._api.editMessageText(state.chatId, allMessages[i], chunks[i]),
-            "editMessageText",
-          );
+          await this._safeEdit(state.chatId, allMessages[i], chunks[i]);
         } else {
           const res = await retryTelegramCall(
             () => this._api.sendMessage(state.chatId, chunks[i], {
@@ -300,5 +298,46 @@ export class StreamingUpdater {
       err.message.includes("message is too long") ||
       err.message.includes("MESSAGE_TOO_LONG")
     );
+  }
+
+  /**
+   * Edit a message with 429 rate-limit retry and Markdown parse fallback.
+   * On 429: reads retry_after, waits, then retries once.
+   * On "can't parse" error: retries without parse_mode.
+   */
+  private async _safeEdit(
+    chatId: number,
+    messageId: number,
+    text: string,
+  ): Promise<void> {
+    try {
+      await this._api.editMessageText(chatId, messageId, text);
+    } catch (err) {
+      // Handle 429 rate limit — wait retry_after seconds, then retry once
+      if (err instanceof GrammyError && err.error_code === 429) {
+        const delayMs = getRetryDelayMs(err, 5000);
+        log.warn("editMessageText rate limited, waiting", { delayMs, messageId });
+        await new Promise<void>((r) => setTimeout(r, delayMs));
+        try {
+          await this._api.editMessageText(chatId, messageId, text);
+          return;
+        } catch (retryErr) {
+          log.warn("editMessageText retry also failed", { messageId, error: retryErr });
+          throw retryErr;
+        }
+      }
+
+      // Handle Markdown parse errors — retry without parse_mode
+      if (
+        err instanceof GrammyError &&
+        err.message.toLowerCase().includes("can't parse")
+      ) {
+        log.warn("Markdown parse failed, retrying without parse_mode", { messageId });
+        await this._api.editMessageText(chatId, messageId, text, { parse_mode: undefined });
+        return;
+      }
+
+      throw err;
+    }
   }
 }
