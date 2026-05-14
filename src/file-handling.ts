@@ -3,7 +3,7 @@ import { extname, join } from "path";
 import { pipeline } from "stream/promises";
 import { Readable } from "stream";
 import type { Api } from "grammy";
-import type { ImageContent } from "@mariozechner/pi-ai";
+import type { ImageContent } from "@earendil-works/pi-ai";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("file-handling");

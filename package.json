@@ -19,7 +19,7 @@
     "check": "tsc --noEmit && eslint src/"
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "^0.55.4",
+    "@earendil-works/pi-coding-agent": "*",
     "dotenv": "^16.4.7",
     "grammy": "^1.35.0"
   },

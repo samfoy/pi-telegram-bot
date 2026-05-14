@@ -1,4 +1,4 @@
-import type { ContextUsage } from "@mariozechner/pi-coding-agent";
+import type { ContextUsage } from "@earendil-works/pi-coding-agent";
 
 export function formatTokenCount(n: number): string {
   if (n < 1000) return String(n);

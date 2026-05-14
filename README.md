@@ -97,5 +97,5 @@ diff-reviewer.ts      → Git diff generation and posting
 ## Requirements
 
 - Node.js >= 20
-- A pi-coding-agent installation (`@mariozechner/pi-coding-agent`)
+- A pi-coding-agent installation (`@earendil-works/pi-coding-agent`)
 - Anthropic API key (or other LLM provider configured in pi)

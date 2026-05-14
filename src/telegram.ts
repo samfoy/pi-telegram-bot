@@ -1,5 +1,5 @@
 import { Bot } from "grammy";
-import type { ImageContent } from "@mariozechner/pi-ai";
+import type { ImageContent } from "@earendil-works/pi-ai";
 import type { Config } from "./config.js";
 import { BotSessionManager, SessionLimitError } from "./session-manager.js";
 import { dispatchCommand, BOT_COMMANDS } from "./commands.js";

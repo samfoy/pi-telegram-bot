@@ -12,7 +12,7 @@ const MAX_TOTAL_CHARS = 50_000;
 
 export interface BufferedMessage {
   text: string;
-  images?: import("@mariozechner/pi-ai").ImageContent[];
+  images?: import("@earendil-works/pi-ai").ImageContent[];
 }
 
 type FlushCallback = (combined: BufferedMessage) => void | Promise<void>;
