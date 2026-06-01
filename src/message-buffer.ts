@@ -39,7 +39,7 @@ export class MessageBuffer {
       if (existing.parts.length >= MAX_PARTS || totalChars > MAX_TOTAL_CHARS) {
         clearTimeout(existing.timer);
         this._buffers.delete(key);
-        this._flush(key, existing.parts);
+        void this._flush(key, existing.parts);
         // Start new buffer for this message
         this._startBuffer(key, msg);
         return;
@@ -49,33 +49,40 @@ export class MessageBuffer {
       existing.parts.push(msg);
       existing.timer = setTimeout(() => {
         this._buffers.delete(key);
-        this._flush(key, existing.parts);
+        void this._flush(key, existing.parts);
       }, DEBOUNCE_MS);
     } else {
       this._startBuffer(key, msg);
     }
   }
 
-  /** Flush all pending buffers immediately (e.g. on shutdown). */
-  flushAll(): void {
-    for (const [key, buf] of this._buffers) {
+  /**
+   * Flush all pending buffers immediately (e.g. on shutdown).
+   * Cancels pending timers synchronously and resolves once each in-flight
+   * onFlush callback has settled. No-op if nothing is pending.
+   */
+  async flushAll(): Promise<void> {
+    const entries = [...this._buffers.entries()];
+    this._buffers.clear();
+    const pending: Array<Promise<void>> = [];
+    for (const [key, buf] of entries) {
       clearTimeout(buf.timer);
-      this._buffers.delete(key);
-      this._flush(key, buf.parts);
+      pending.push(this._flush(key, buf.parts));
     }
+    await Promise.all(pending);
   }
 
   private _startBuffer(key: string, msg: BufferedMessage): void {
     const parts = [msg];
     const timer = setTimeout(() => {
       this._buffers.delete(key);
-      this._flush(key, parts);
+      void this._flush(key, parts);
     }, DEBOUNCE_MS);
     this._buffers.set(key, { parts, timer });
   }
 
-  private _flush(key: string, parts: BufferedMessage[]): void {
-    if (parts.length === 0) return;
+  private _flush(key: string, parts: BufferedMessage[]): Promise<void> {
+    if (parts.length === 0) return Promise.resolve();
 
     // Copy buffer contents before sending — only consider sent after callback succeeds
     const snapshot = [...parts];
@@ -92,14 +99,16 @@ export class MessageBuffer {
       const result = this._onFlush(combined);
       // If the callback returns a promise, handle async failure
       if (result && typeof (result as Promise<void>).catch === "function") {
-        (result as Promise<void>).catch(() => {
+        return (result as Promise<void>).catch(() => {
           // Re-enqueue the parts that failed to send
           this._requeue(key, snapshot);
         });
       }
+      return Promise.resolve();
     } catch {
       // Sync failure — re-enqueue
       this._requeue(key, snapshot);
+      return Promise.resolve();
     }
   }
 

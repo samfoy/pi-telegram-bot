@@ -1,10 +1,28 @@
 import type { Api } from "grammy";
 import { GrammyError } from "grammy";
-import { markdownToTelegram, splitMessage, formatToolSummaryLine, type ToolCallRecord } from "./formatter.js";
+import { splitMessage, formatToolSummaryLine, type ToolCallRecord } from "./formatter.js";
 import { retryTelegramCall, getRetryDelayMs } from "./telegram-retry.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("streaming-updater");
+
+/**
+ * Format the streaming-thinking preview shown as a blockquote prefix.
+ * Takes the tail of the accumulated thinking text, drops the leading
+ * partial word so we don't render mid-word fragments like "sponsive",
+ * collapses newlines to spaces, and prefixes an ellipsis when truncated.
+ */
+function formatThinkingPreview(thinking: string, maxChars = 200): string {
+  const collapsed = thinking.replace(/\s+/g, " ").trim();
+  if (collapsed.length <= maxChars) return collapsed;
+  let tail = collapsed.slice(-maxChars);
+  // Drop leading partial word so the preview starts cleanly at a word boundary
+  const firstSpace = tail.indexOf(" ");
+  if (firstSpace !== -1 && firstSpace < tail.length - 1) {
+    tail = tail.slice(firstSpace + 1);
+  }
+  return `\u2026${tail}`;
+}
 
 export interface StreamingState {
   chatId: number;
@@ -43,6 +61,7 @@ export class StreamingUpdater {
     const res = await retryTelegramCall(
       () => this._api.sendMessage(chatId, "\u23F3 Thinking...", {
         message_thread_id: threadId,
+        parse_mode: "Markdown",
       }),
       "sendMessage (begin)",
     );
@@ -115,10 +134,6 @@ export class StreamingUpdater {
     this._cancelTimer(state);
     this._cancelCoalesceTimer(state);
     await this._doFlush(state, false);
-
-    if (state.toolRecords.length > 0) {
-      await this._postToolLog(state);
-    }
   }
 
   async error(state: StreamingState, err: Error): Promise<void> {
@@ -186,10 +201,6 @@ export class StreamingUpdater {
     }
   }
 
-  private async _postToolLog(_state: StreamingState): Promise<void> {
-    // Tool activity is summarised inline in the response message — no separate log needed.
-  }
-
   private async _flush(state: StreamingState, partial: boolean): Promise<void> {
     const body = state.rawMarkdown.trim();
 
@@ -225,15 +236,20 @@ export class StreamingUpdater {
     // dropped from the final message (the answer speaks for itself).
     let thinkingBlock = "";
     if (partial && state.thinkingText && !body) {
-      const preview = state.thinkingText.slice(-200).trim().replace(/\n+/g, " ");
-      thinkingBlock = `> _\u{1F9E0} ${preview}_`;
+      thinkingBlock = `> _\u{1F9E0} ${formatThinkingPreview(state.thinkingText)}_`;
     }
 
     const parts = [thinkingBlock, body, toolBlock].filter(Boolean);
     const combined = parts.join("\n\n");
     if (!combined) return;
 
-    const formatted = markdownToTelegram(combined, partial);
+    // Auto-close an unbalanced ``` fence while streaming so partial messages
+    // still parse as Markdown (matches the previous markdownToTelegram helper).
+    let formatted = combined;
+    if (partial) {
+      const fenceCount = (formatted.match(/```/g) ?? []).length;
+      if (fenceCount % 2 !== 0) formatted += "\n```";
+    }
     await this._postChunked(state, formatted, this._msgLimit);
   }
 
@@ -247,12 +263,7 @@ export class StreamingUpdater {
         if (i < allMessages.length) {
           await this._safeEdit(state.chatId, allMessages[i], chunks[i]);
         } else {
-          const res = await retryTelegramCall(
-            () => this._api.sendMessage(state.chatId, chunks[i], {
-              message_thread_id: state.threadId,
-            }),
-            "sendMessage (continuation)",
-          );
+          const res = await this._safeSendChunk(state.chatId, state.threadId, chunks[i]);
           allMessages.push(res.message_id);
         }
       }
@@ -275,6 +286,7 @@ export class StreamingUpdater {
       await retryTelegramCall(
         () => this._api.sendMessage(chatId, text, {
           message_thread_id: threadId,
+          parse_mode: "Markdown",
         }),
         "sendMessage (safe)",
       );
@@ -284,13 +296,59 @@ export class StreamingUpdater {
         await retryTelegramCall(
           () => this._api.sendMessage(chatId, truncated, {
             message_thread_id: threadId,
+            parse_mode: "Markdown",
           }),
           "sendMessage (truncated)",
         );
-      } else {
-        throw err;
+        return;
       }
+      if (this._isParseError(err)) {
+        log.warn("Markdown parse failed on sendMessage, retrying without parse_mode", { chatId });
+        await retryTelegramCall(
+          () => this._api.sendMessage(chatId, text, {
+            message_thread_id: threadId,
+          }),
+          "sendMessage (parse-fallback)",
+        );
+        return;
+      }
+      throw err;
     }
+  }
+
+  /**
+   * Send a chunk for _postChunked with Markdown parse_mode + plain-text fallback
+   * on "can't parse" errors. Mirrors _safeEdit's fallback path.
+   */
+  private async _safeSendChunk(
+    chatId: number,
+    threadId: number | undefined,
+    text: string,
+  ): Promise<{ message_id: number }> {
+    try {
+      return await retryTelegramCall(
+        () => this._api.sendMessage(chatId, text, {
+          message_thread_id: threadId,
+          parse_mode: "Markdown",
+        }),
+        "sendMessage (continuation)",
+      );
+    } catch (err: unknown) {
+      if (this._isParseError(err)) {
+        log.warn("Markdown parse failed on continuation, retrying without parse_mode", { chatId });
+        return await retryTelegramCall(
+          () => this._api.sendMessage(chatId, text, {
+            message_thread_id: threadId,
+          }),
+          "sendMessage (continuation, parse-fallback)",
+        );
+      }
+      throw err;
+    }
+  }
+
+  private _isParseError(err: unknown): boolean {
+    return err instanceof GrammyError && err.message.toLowerCase().includes("can't parse");
   }
 
   private _isMsgTooLong(err: unknown): boolean {
@@ -311,7 +369,7 @@ export class StreamingUpdater {
     text: string,
   ): Promise<void> {
     try {
-      await this._api.editMessageText(chatId, messageId, text);
+      await this._api.editMessageText(chatId, messageId, text, { parse_mode: "Markdown" });
     } catch (err) {
       // Handle 429 rate limit — wait retry_after seconds, then retry once
       if (err instanceof GrammyError && err.error_code === 429) {
@@ -319,7 +377,7 @@ export class StreamingUpdater {
         log.warn("editMessageText rate limited, waiting", { delayMs, messageId });
         await new Promise<void>((r) => setTimeout(r, delayMs));
         try {
-          await this._api.editMessageText(chatId, messageId, text);
+          await this._api.editMessageText(chatId, messageId, text, { parse_mode: "Markdown" });
           return;
         } catch (retryErr) {
           log.warn("editMessageText retry also failed", { messageId, error: retryErr });

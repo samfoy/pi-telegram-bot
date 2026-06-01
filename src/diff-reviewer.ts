@@ -1,4 +1,4 @@
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { InputFile } from "grammy";
 import type { Api } from "grammy";
 import type { ToolCallRecord } from "./formatter.js";
@@ -37,7 +37,7 @@ export interface DiffResult {
 
 export function getHeadRef(cwd: string): string | null {
   try {
-    return execSync("git rev-parse HEAD", { cwd, encoding: "utf-8", stdio: "pipe" }).trim();
+    return execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf-8", stdio: "pipe" }).trim();
   } catch {
     return null;
   }
@@ -45,7 +45,7 @@ export function getHeadRef(cwd: string): string | null {
 
 export function isGitRepo(cwd: string): boolean {
   try {
-    execSync("git rev-parse --is-inside-work-tree", { cwd, stdio: "pipe" });
+    execFileSync("git", ["rev-parse", "--is-inside-work-tree"], { cwd, stdio: "pipe" });
     return true;
   } catch {
     return false;
@@ -62,11 +62,11 @@ export function generateDiff(cwd: string, options?: GenerateDiffOptions): DiffRe
   try {
     const baseRef = options?.baseRef;
     let diff: string;
-    const diffCmd = baseRef ? `git diff ${baseRef}` : "git diff HEAD";
+    const diffArgs = baseRef ? ["diff", baseRef] : ["diff", "HEAD"];
     try {
-      diff = execSync(diffCmd, { cwd, encoding: "utf-8", maxBuffer: 2 * 1024 * 1024 });
+      diff = execFileSync("git", diffArgs, { cwd, encoding: "utf-8", maxBuffer: 2 * 1024 * 1024 });
     } catch {
-      diff = execSync("git diff --cached", { cwd, encoding: "utf-8", maxBuffer: 2 * 1024 * 1024 });
+      diff = execFileSync("git", ["diff", "--cached"], { cwd, encoding: "utf-8", maxBuffer: 2 * 1024 * 1024 });
     }
 
     diff = appendUntrackedDiffs(diff, cwd);
@@ -81,7 +81,7 @@ export function generateDiff(cwd: string, options?: GenerateDiffOptions): DiffRe
 }
 
 function appendUntrackedDiffs(diff: string, cwd: string): string {
-  const untracked = execSync("git ls-files --others --exclude-standard", {
+  const untracked = execFileSync("git", ["ls-files", "--others", "--exclude-standard"], {
     cwd,
     encoding: "utf-8",
   }).trim();
@@ -89,17 +89,24 @@ function appendUntrackedDiffs(diff: string, cwd: string): string {
   if (!untracked) return diff;
 
   for (const file of untracked.split("\n").filter(Boolean)) {
+    // `git diff --no-index` exits 1 when files differ — that's the success case for us.
+    // The original shell form used `|| true` to swallow that exit; we reproduce it via try/catch
+    // and read stdout off the thrown error.
+    let fileDiff = "";
     try {
-      const fileDiff = execSync(`git diff --no-index /dev/null "${file}" || true`, {
+      fileDiff = execFileSync("git", ["diff", "--no-index", "/dev/null", file], {
         cwd,
         encoding: "utf-8",
         maxBuffer: 1024 * 1024,
       });
-      if (fileDiff.trim()) {
-        diff += "\n" + fileDiff;
+    } catch (err) {
+      const stdout = (err as { stdout?: string }).stdout;
+      if (typeof stdout === "string") {
+        fileDiff = stdout;
       }
-    } catch {
-      // skip
+    }
+    if (fileDiff.trim()) {
+      diff += "\n" + fileDiff;
     }
   }
 

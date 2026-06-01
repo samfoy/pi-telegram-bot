@@ -5,7 +5,7 @@ import type { ThreadSession } from "./thread-session.js";
 import type { BotSessionManager, ThreadSessionInfo } from "./session-manager.js";
 import type { ThinkingLevel } from "./config.js";
 import { formatContextUsage, formatContextBar, formatTokenCount } from "./context-format.js";
-import { generateDiff } from "./diff-reviewer.js";
+import { postDiffReview } from "./diff-reviewer.js";
 
 const VALID_THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
@@ -18,8 +18,8 @@ export const BOT_COMMANDS: { command: string; description: string }[] = [
   { command: "sessions", description: "List active sessions" },
   { command: "cwd",      description: "Change working directory" },
   { command: "reload",   description: "Reload extensions and prompt templates" },
-  { command: "diff",     description: "Show git diff of uncommitted changes" },
-  { command: "compact",  description: "Compact conversation to free context space" },
+  { command: "diff",     description: "Show git diff of uncommitted changes (optional baseRef)" },
+  { command: "compact",  description: "Compact conversation to free context space (optional instructions)" },
   { command: "context",  description: "Show context window usage" },
   { command: "btw",      description: "Ask a side question without affecting session history" },
   { command: "help",     description: "Show this list" },
@@ -54,8 +54,8 @@ const handlers: Record<string, CommandHandler> = {
       "/sessions \u2014 List active sessions",
       "/cwd <path> \u2014 Change working directory",
       "/reload \u2014 Reload extensions and prompt templates",
-      "/diff \u2014 Show git diff of uncommitted changes",
-      "/compact \u2014 Compact conversation to free context space",
+      "/diff [baseRef] \u2014 Show git diff of uncommitted changes (vs HEAD by default, or vs <baseRef>)",
+      "/compact [instructions] \u2014 Compact conversation to free context space (optional focus instructions)",
       "/context \u2014 Show context window usage",
       "/btw <question> \u2014 Ask a side question without affecting history",
       "/help \u2014 Show this list",
@@ -195,24 +195,19 @@ const handlers: Record<string, CommandHandler> = {
     await reply(ctx, "\u{1F504} Extensions and prompt templates reloaded.");
   },
 
-  async diff(ctx) {
+  async diff(ctx, args) {
     if (!ctx.session) {
       await reply(ctx, "No active session.");
       return;
     }
-    const result = generateDiff(ctx.session.cwd);
-    if (!result) {
+    const baseRef = args.trim() || undefined;
+    const posted = await postDiffReview(ctx.api, ctx.chatId, ctx.threadId, ctx.session.cwd, { baseRef });
+    if (!posted) {
       await reply(ctx, "No uncommitted changes found (or not a git repo).");
-      return;
     }
-    const statsLine = result.stats ? `\n${result.stats}` : "";
-    const diffPreview = result.diff.length > 3000
-      ? result.diff.slice(0, 3000) + "\n...(truncated)"
-      : result.diff;
-    await reply(ctx, `\u{1F4DD} ${result.fileCount} file${result.fileCount === 1 ? "" : "s"} changed${statsLine}\n\n\`\`\`diff\n${diffPreview}\n\`\`\``);
   },
 
-  async compact(ctx) {
+  async compact(ctx, args) {
     if (!ctx.session) {
       await reply(ctx, "No active session.");
       return;
@@ -223,7 +218,7 @@ const handlers: Record<string, CommandHandler> = {
     }
     await reply(ctx, "\u{1F5DC}\uFE0F Compacting conversation...");
     try {
-      const result = await ctx.session.compact();
+      const result = await ctx.session.compact(args.trim() || undefined);
       const afterUsage = ctx.session.getContextUsage();
       const beforeStr = formatTokenCount(result.tokensBefore);
       const afterStr = afterUsage?.tokens != null ? formatTokenCount(afterUsage.tokens) : "unknown";

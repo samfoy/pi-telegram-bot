@@ -1,18 +1,3 @@
-const SPECIAL_CHARS = /([_*\[\]()~`>#+\-=|{}.!\\])/g;
-
-export function escapeMarkdownV2(text: string): string {
-  return text.replace(SPECIAL_CHARS, "\\$1");
-}
-
-export function markdownToTelegram(markdown: string, partial?: boolean): string {
-  let md = markdown;
-  if (partial) {
-    const fenceCount = (md.match(/```/g) ?? []).length;
-    if (fenceCount % 2 !== 0) md += "\n```";
-  }
-  return md;
-}
-
 export function splitMessage(text: string, limit = 4000): string[] {
   if (text.length <= limit) return [text];
 

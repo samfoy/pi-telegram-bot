@@ -1,6 +1,6 @@
 import path from "path";
 import { mkdirSync, realpathSync } from "fs";
-import { createAgentSession, createCodingTools, DefaultResourceLoader, SessionManager as PiSessionManager } from "@earendil-works/pi-coding-agent";
+import { createAgentSession, DefaultResourceLoader, getAgentDir, SessionManager as PiSessionManager } from "@earendil-works/pi-coding-agent";
 import type { AgentSession, AgentSessionEvent, AgentSessionEventListener, CompactionResult, ContextUsage, PromptTemplate } from "@earendil-works/pi-coding-agent";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { Api } from "grammy";
@@ -82,13 +82,12 @@ export class ThreadSession {
       ?? path.join(nativeSessionDir, `${params.threadKey}.jsonl`);
     const piSessionManager = PiSessionManager.open(sessionFilePath, nativeSessionDir);
 
-    const resourceLoader = new DefaultResourceLoader({ cwd: params.cwd });
+    const resourceLoader = new DefaultResourceLoader({ cwd: params.cwd, agentDir: getAgentDir() });
     await resourceLoader.reload();
 
     const { session } = await createAgentSession({
       cwd: params.cwd,
       sessionManager: piSessionManager,
-      tools: createCodingTools(params.cwd),
       customTools: [],
       resourceLoader,
     });
@@ -109,13 +108,19 @@ export class ThreadSession {
     const allModels = registry.getAll();
     const model = allModels.find(
       (m) => m.provider === params.config.provider && m.id === params.config.model,
-    ) ?? allModels.find(
-      (m) => m.provider === params.config.provider,
     );
-    if (model) {
-      await session.setModel(model);
-      session.setThinkingLevel(params.config.thinkingLevel);
+    if (!model) {
+      const candidates = allModels
+        .filter((m) => m.provider === params.config.provider)
+        .map((m) => m.id)
+        .sort();
+      throw new Error(
+        `Model not found: provider="${params.config.provider}" id="${params.config.model}". ` +
+        `Available models for this provider: ${candidates.length ? candidates.join(", ") : "(none — provider not configured)"}`,
+      );
     }
+    await session.setModel(model);
+    session.setThinkingLevel(params.config.thinkingLevel);
 
     const updater = new StreamingUpdater(params.api, params.config.streamThrottleMs, params.config.telegramMsgLimit);
 
@@ -238,14 +243,15 @@ export class ThreadSession {
         return;
       }
 
-      if (event.type === "auto_compaction_start") {
+      // Auto-triggered compaction (threshold/overflow) — manual /compact has its own user-facing messages in commands.ts.
+      if (event.type === "compaction_start" && event.reason !== "manual") {
         this._postToChat("\u{1F5DC}\uFE0F Auto-compacting conversation...").catch((err) => {
           log.error("Failed to post auto-compaction start", { threadKey: this.threadKey, error: err });
         });
         return;
       }
 
-      if (event.type === "auto_compaction_end") {
+      if (event.type === "compaction_end" && event.reason !== "manual") {
         const result = event.result;
         if (result) {
           const after = this.getContextUsage();
@@ -405,7 +411,7 @@ export class ThreadSession {
   }
 
   async newSession(): Promise<void> {
-    await this._agentSession.newSession();
+    this._agentSession.sessionManager.newSession();
     this._lastContextWarningThreshold = 0;
   }
 

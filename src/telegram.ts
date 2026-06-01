@@ -12,6 +12,7 @@ const log = createLogger("telegram");
 export interface TelegramApp {
   bot: Bot;
   sessionManager: BotSessionManager;
+  flushAllBuffers: () => Promise<void>;
 }
 
 export function makeThreadKey(chatId: number, threadId: number | undefined): string {
@@ -135,6 +136,17 @@ export function createApp(config: Config): TelegramApp {
 
     if (text.startsWith("/")) return;
 
+    // If the user is replying to a previous message, prepend the quoted snippet so the agent has context.
+    let promptText = text;
+    const replyTo = ctx.message.reply_to_message;
+    if (replyTo) {
+      const quoted = replyTo.text ?? replyTo.caption ?? "";
+      if (quoted) {
+        const snippet = quoted.length > 500 ? quoted.slice(0, 500) + "\u2026" : quoted;
+        promptText = text ? `Re: "${snippet}"\n\n${text}` : `Re: "${snippet}"`;
+      }
+    }
+
     // Ack the message with a reaction so the user knows we received it
     if (config.ackReaction) {
       try {
@@ -172,7 +184,7 @@ export function createApp(config: Config): TelegramApp {
     const existingSession = sessionManager.get(threadKey);
     const cwdForFiles = existingSession?.cwd ?? (process.env.HOME ?? process.cwd());
     const { text: enrichedText, images } = await enrichPromptWithFiles(
-      telegramFiles, text, cwdForFiles, bot.api,
+      telegramFiles, promptText, cwdForFiles, bot.api,
     );
 
     // Push into the per-thread buffer — debounces and combines split messages
@@ -182,5 +194,9 @@ export function createApp(config: Config): TelegramApp {
     });
   });
 
-  return { bot, sessionManager };
+  async function flushAllBuffers(): Promise<void> {
+    await Promise.all([...threadBuffers.values()].map((b) => b.flushAll()));
+  }
+
+  return { bot, sessionManager, flushAllBuffers };
 }

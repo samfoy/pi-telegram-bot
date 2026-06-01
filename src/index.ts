@@ -21,7 +21,7 @@ log.info("pi-telegram-bot starting", {
   ackReaction: config.ackReaction,
 });
 
-const { bot, sessionManager } = createApp(config);
+const { bot, sessionManager, flushAllBuffers } = createApp(config);
 
 async function startWithRetry(): Promise<void> {
   let attempt = 0;
@@ -64,20 +64,28 @@ sessionManager.restoreAll().then((count) => {
   log.error("Failed to restore sessions", { error: err });
 });
 
-process.on("SIGINT", async () => {
-  log.info("Shutting down");
+let isShuttingDown = false;
+
+async function shutdown(signal: string): Promise<void> {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  log.info(`Shutting down (${signal})`);
+  try {
+    await flushAllBuffers();
+  } catch (err) {
+    log.error("Failed to flush message buffers on shutdown", { error: err });
+  }
   await sessionManager.disposeAll();
   await sessionManager.flushRegistry();
   sessionManager.disposeRegistry();
-  bot.stop();
+  await bot.stop();
   process.exit(0);
+}
+
+process.on("SIGINT", () => {
+  void shutdown("SIGINT");
 });
 
-process.on("SIGTERM", async () => {
-  log.info("Shutting down (SIGTERM)");
-  await sessionManager.disposeAll();
-  await sessionManager.flushRegistry();
-  sessionManager.disposeRegistry();
-  bot.stop();
-  process.exit(0);
+process.on("SIGTERM", () => {
+  void shutdown("SIGTERM");
 });
