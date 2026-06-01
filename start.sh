@@ -8,4 +8,4 @@ if [[ -f .env ]]; then
   set +a
 fi
 
-exec node --import tsx/esm src/index.ts
+exec node --import tsx src/index.ts

@@ -12,7 +12,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "start": "node --import tsx/esm src/index.ts",
+    "start": "node --import tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",

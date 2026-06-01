@@ -29,7 +29,7 @@ export AWS_REGION="${AWS_REGION:-us-west-2}"
 export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-west-2}"
 
 echo "[launcher] Starting pi-telegram-bot..."
-node --import tsx/esm src/index.ts &
+node --import tsx src/index.ts &
 BOT_PID=$!
 echo "$BOT_PID" > "$PIDFILE"
 echo "[launcher] Started with pid $BOT_PID"
