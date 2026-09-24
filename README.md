@@ -1,5 +1,8 @@
 # pi-telegram-bot
 
+> [!WARNING]
+> **Deprecated — no longer maintained.** This package is archived and will not receive updates or compatibility fixes for current pi releases.
+
 Telegram bot exposing [pi](https://github.com/mariozechner/pi) as a personal coding agent. Chat with pi in Telegram with streaming responses, tool execution, and model switching.
 
 ## Setup
